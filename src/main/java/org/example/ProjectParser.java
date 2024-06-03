@@ -2,6 +2,7 @@ package org.example;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseException;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.PackageDeclaration;
@@ -17,18 +18,17 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * ProjectParser class to parse Java source files in a specified directory,
  * extract various pieces of information, and save the result in JSON format.
  */
 public class ProjectParser {
+
+    private static final Logger logger = Logger.getLogger(ProjectParser.class.getName());
 
     /**
      * Main method to initiate parsing of Java source files.
@@ -44,29 +44,38 @@ public class ProjectParser {
             // List to store parsed information from each Java file
             List<Map<String, Object>> parsedFiles = new ArrayList<>();
             for (File file : javaFiles) {
-                // Read the file content
-                FileInputStream in = new FileInputStream(file);
-                // Parse the file content into a CompilationUnit (AST root node)
-                CompilationUnit cu = JavaParser.parse(in);
+                try {
+                    // Read the file content
+                    FileInputStream in = new FileInputStream(file);
+                    // Parse the file content into a CompilationUnit (AST root node)
+                    CompilationUnit cu = JavaParser.parse(in);
 
-                // Create a visitor to collect information from the CompilationUnit
-                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())));
-                // Visit the CompilationUnit with the created visitor
-                cu.accept(classVisitor, null);
+                    // Create a visitor to collect information from the CompilationUnit
+                    ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())));
+                    // Visit the CompilationUnit with the created visitor
+                    cu.accept(classVisitor, null);
 
-                // Add the collected information to the list
-                parsedFiles.add(classVisitor.getResult());
+                    // Add the collected information to the list
+                    parsedFiles.add(classVisitor.getResult());
+                } catch (IOException e) {
+                    logger.log(Level.SEVERE, "Error reading file: " + file.getAbsolutePath(), e);
+                }
             }
 
-            // Convert the result to JSON using Jackson ObjectMapper
-            ObjectMapper mapper = new ObjectMapper();
-            String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsedFiles);
+            try {
+                // Convert the result to JSON using Jackson ObjectMapper
+                ObjectMapper mapper = new ObjectMapper();
+                String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsedFiles);
 
-            // Save the JSON result to a file in the "src" directory
-            Files.write(Paths.get("src", "parsed_output.json"), json.getBytes());
+                // Save the JSON result to a file in the "src" directory
+                Files.write(Paths.get("src", "parsed_output.json"), json.getBytes());
+                logger.info("JSON output successfully written to src/parsed_output.json");
+            } catch (IOException e) {
+                logger.log(Level.SEVERE, "Error writing JSON output file.", e);
+            }
 
         } catch (IOException e) {
-            e.printStackTrace();
+            logger.log(Level.SEVERE, "Error initializing ProjectParser.", e);
         }
     }
 
@@ -79,11 +88,16 @@ public class ProjectParser {
      */
     private static List<File> listJavaFiles(String directoryName) throws IOException {
         List<File> fileList = new ArrayList<>();
-        // Walk through the directory and collect all .java files
-        Files.walk(Paths.get(directoryName))
-                .filter(Files::isRegularFile) // Filter to include only regular files
-                .filter(path -> path.toString().endsWith(".java")) // Filter to include only .java files
-                .forEach(path -> fileList.add(path.toFile())); // Add each file to the fileList
+        try {
+            // Walk through the directory and collect all .java files
+            Files.walk(Paths.get(directoryName))
+                    .filter(Files::isRegularFile) // Filter to include only regular files
+                    .filter(path -> path.toString().endsWith(".java")) // Filter to include only .java files
+                    .forEach(path -> fileList.add(path.toFile())); // Add each file to the fileList
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Error walking through directory: " + directoryName, e);
+            throw e;
+        }
         return fileList;
     }
 
@@ -200,15 +214,30 @@ public class ProjectParser {
             result.put("ClassAnnotations", classAnnotations);
             result.put("Fields", fields);
             result.put("FieldAnnotations", fieldAnnotations);
-            result.put("Methods", methods);
-            result.put("MethodDetails", methodDetails);
-            result.put("MethodAnnotations", methodAnnotations);
-            result.put("MethodReturnTypes", methodReturnTypes);
-            result.put("MethodParameters", methodParameters);
-            result.put("MethodCalls", methodCalls);
-            result.put("ObjectCreations", objectCreations);
             result.put("Imports", imports);
             result.put("Code", code);
+            result.put("Extends", extendsClass);
+            result.put("Implements", implementsInterfaces);
+
+            // Create a list to hold method details
+            List<Map<String, Object>> methodsList = new ArrayList<>();
+            for (String method : methods) {
+                Map<String, Object> methodInfo = new HashMap<>();
+                methodInfo.put("MethodName", method);
+                methodInfo.put("ReturnType", methodReturnTypes.get(method));
+                methodInfo.put("Parameters", methodParameters.get(method));
+                methodInfo.put("Annotations", methodAnnotations);
+                methodInfo.put("Details", methodDetails.get(method));
+                methodInfo.put("Calls", methodCalls.get(method));
+                methodsList.add(methodInfo); // Add method info to the list
+            }
+
+            // Add methods list to the result
+            result.put("Methods", methodsList);
+
+            // Add object creations to the result
+            result.put("ObjectCreations", objectCreations);
+
             return result;
         }
     }
