@@ -2,7 +2,8 @@ package org.example;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.JavaParser;
-import com.github.javaparser.ParseException;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.PackageDeclaration;
@@ -38,8 +39,13 @@ public class ProjectParser {
     public static void main(String[] args) {
         try {
             // Set the path to your Java project directory
-            String projectDir = "C:\\Users\\user\\downloads\\bankensApi";
+            String projectDir = "/home/user/Pobrane/Codezilla - CCGW/CCGW - kod";
             List<File> javaFiles = listJavaFiles(projectDir);  // List all Java files in the specified directory
+
+            // Configure JavaParser to use Java 12
+            ParserConfiguration parserConfiguration = new ParserConfiguration();
+            parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_12);
+            JavaParser javaParser = new JavaParser(parserConfiguration);
 
             // List to store parsed information from each Java file
             List<Map<String, Object>> parsedFiles = new ArrayList<>();
@@ -48,7 +54,7 @@ public class ProjectParser {
                     // Read the file content
                     FileInputStream in = new FileInputStream(file);
                     // Parse the file content into a CompilationUnit (AST root node)
-                    CompilationUnit cu = JavaParser.parse(in);
+                    CompilationUnit cu = javaParser.parse(in).getResult().orElseThrow(() -> new Exception("Parsing failed"));
 
                     // Create a visitor to collect information from the CompilationUnit
                     ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())));
@@ -57,8 +63,9 @@ public class ProjectParser {
 
                     // Add the collected information to the list
                     parsedFiles.add(classVisitor.getResult());
-                } catch (IOException e) {
-                    logger.log(Level.SEVERE, "Error reading file: " + file.getAbsolutePath(), e);
+                } catch (Exception e) {
+                    System.out.println("Error reading file: " + file.getAbsolutePath());
+                    throw e;
                 }
             }
 
@@ -74,7 +81,7 @@ public class ProjectParser {
                 logger.log(Level.SEVERE, "Error writing JSON output file.", e);
             }
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             logger.log(Level.SEVERE, "Error initializing ProjectParser.", e);
         }
     }
