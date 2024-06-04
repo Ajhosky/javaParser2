@@ -3,13 +3,13 @@ package org.example;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
-import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.PackageDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
@@ -37,52 +37,65 @@ public class ProjectParser {
      * @param args command line arguments
      */
     public static void main(String[] args) {
+        if (args.length != 2) {
+            System.out.println("Usage: java ProjectParser <projectDir> <outputJsonFile>");
+            return;
+        }
+
+        String projectDir = args[0];
+        String outputJsonFile = args[1];
+
         try {
-            // Set the path to your Java project directory
-            String projectDir = "/home/user/Pobrane/Codezilla - CCGW/CCGW - kod";
-            List<File> javaFiles = listJavaFiles(projectDir);  // List all Java files in the specified directory
-
-            // Configure JavaParser to use Java 12
-            ParserConfiguration parserConfiguration = new ParserConfiguration();
-            parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_12);
-            JavaParser javaParser = new JavaParser(parserConfiguration);
-
-            // List to store parsed information from each Java file
-            List<Map<String, Object>> parsedFiles = new ArrayList<>();
-            for (File file : javaFiles) {
-                try {
-                    // Read the file content
-                    FileInputStream in = new FileInputStream(file);
-                    // Parse the file content into a CompilationUnit (AST root node)
-                    CompilationUnit cu = javaParser.parse(in).getResult().orElseThrow(() -> new Exception("Parsing failed"));
-
-                    // Create a visitor to collect information from the CompilationUnit
-                    ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())));
-                    // Visit the CompilationUnit with the created visitor
-                    cu.accept(classVisitor, null);
-
-                    // Add the collected information to the list
-                    parsedFiles.add(classVisitor.getResult());
-                } catch (Exception e) {
-                    System.out.println("Error reading file: " + file.getAbsolutePath());
-                    throw e;
-                }
-            }
-
-            try {
-                // Convert the result to JSON using Jackson ObjectMapper
-                ObjectMapper mapper = new ObjectMapper();
-                String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsedFiles);
-
-                // Save the JSON result to a file in the "src" directory
-                Files.write(Paths.get("src", "parsed_output.json"), json.getBytes());
-                logger.info("JSON output successfully written to src/parsed_output.json");
-            } catch (IOException e) {
-                logger.log(Level.SEVERE, "Error writing JSON output file.", e);
-            }
-
+            parseProjectToJson(projectDir, outputJsonFile);
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Error initializing ProjectParser.", e);
+            logger.log(Level.SEVERE, "Error during parsing and JSON generation.", e);
+        }
+    }
+
+    /**
+     * Parses Java source files in the specified directory and writes the result to a JSON file.
+     *
+     * @param projectDir the path to the project directory
+     * @param outputJsonFile the name of the JSON file to be created
+     * @throws Exception if an error occurs during parsing or writing the JSON file
+     */
+    public static void parseProjectToJson(String projectDir, String outputJsonFile) throws Exception {
+        List<File> javaFiles = listJavaFiles(projectDir);  // List all Java files in the specified directory
+
+        // Configure JavaParser to use Java 12
+        ParserConfiguration parserConfiguration = new ParserConfiguration();
+        parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_12);
+        JavaParser javaParser = new JavaParser(parserConfiguration);
+
+        // List to store parsed information from each Java file
+        List<Map<String, Object>> parsedFiles = new ArrayList<>();
+        for (File file : javaFiles) {
+            try (FileInputStream in = new FileInputStream(file)) {
+                // Read the file content and parse it into a CompilationUnit (AST root node)
+                CompilationUnit cu = javaParser.parse(in).getResult().orElseThrow(() -> new Exception("Parsing failed"));
+
+                // Create a visitor to collect information from the CompilationUnit
+                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())), file.getAbsolutePath());
+                // Visit the CompilationUnit with the created visitor
+                cu.accept(classVisitor, null);
+
+                // Add the collected information to the list
+                parsedFiles.add(classVisitor.getResult());
+            } catch (Exception e) {
+                logger.log(Level.SEVERE, "Error reading file: " + file.getAbsolutePath(), e);
+            }
+        }
+
+        try {
+            // Convert the result to JSON using Jackson ObjectMapper
+            ObjectMapper mapper = new ObjectMapper();
+            String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsedFiles);
+
+            // Save the JSON result to the specified file
+            Files.write(Paths.get(outputJsonFile), json.getBytes());
+            logger.info("JSON output successfully written to " + outputJsonFile);
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Error writing JSON output file.", e);
         }
     }
 
@@ -115,10 +128,10 @@ public class ProjectParser {
         private final Map<String, Object> result = new HashMap<>(); // Map to store collected information
         private final Set<String> methods = new HashSet<>(); // Set to store method names
         private final Map<String, Map<String, Object>> methodDetails = new HashMap<>(); // Map to store method details (start/end lines)
-        private final Map<String, Set<String>> methodCalls = new HashMap<>(); // Map to store method calls
+        private final Map<String, Set<Map<String, String>>> methodCalls = new HashMap<>(); // Map to store method calls
         private final Set<String> objectCreations = new HashSet<>(); // Set to store created objects
         private final Set<String> imports = new HashSet<>(); // Set to store import statements
-        private final Set<String> fields = new HashSet<>(); // Set to store field names
+        private final Map<String, String> fields = new HashMap<>(); // Map to store field names and types
         private final Set<String> classAnnotations = new HashSet<>(); // Set to store class annotations
         private final Set<String> fieldAnnotations = new HashSet<>(); // Set to store field annotations
         private final Set<String> methodAnnotations = new HashSet<>(); // Set to store method annotations
@@ -128,15 +141,19 @@ public class ProjectParser {
         private String extendsClass = ""; // String to store extended class name
         private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
         private final String code; // String to store the source code
+        private final String filePath; // String to store the file path
         private String currentMethod = null; // String to store the current method name being visited
+        private String structType = ""; // String to store the type (class or interface)
 
         /**
-         * Constructor to initialize ClassVisitor with the source code.
+         * Constructor to initialize ClassVisitor with the source code and file path.
          *
          * @param code the source code of the Java file
+         * @param filePath the file path of the Java file
          */
-        public ClassVisitor(String code) {
+        public ClassVisitor(String code, String filePath) {
             this.code = code;
+            this.filePath = filePath;
         }
 
         @Override
@@ -148,6 +165,9 @@ public class ProjectParser {
         @Override
         public void visit(ClassOrInterfaceDeclaration n, Void arg) {
             super.visit(n, arg);
+            structType = n.isInterface() ? "Interface" : "Class"; // Determine if it's a class or interface
+            result.put("StructType", structType); // Store the type (class/interface)
+            result.put("classAccess", n.getAccessSpecifier().asString());
             result.put("ClassName", n.getNameAsString()); // Store the class/interface name
             if (n.getExtendedTypes().isNonEmpty()) {
                 extendsClass = n.getExtendedTypes(0).getNameAsString(); // Store the extended class name
@@ -164,7 +184,9 @@ public class ProjectParser {
         @Override
         public void visit(FieldDeclaration n, Void arg) {
             super.visit(n, arg);
-            n.getVariables().forEach(var -> fields.add(var.getNameAsString())); // Store field names
+            for (VariableDeclarator var : n.getVariables()) {
+                fields.put(var.getNameAsString(), var.getType().asString()); // Store field names and types
+            }
             n.getAnnotations().forEach(annotation -> fieldAnnotations.add(annotation.getNameAsString())); // Store field annotations
         }
 
@@ -179,10 +201,13 @@ public class ProjectParser {
             methodParameters.put(methodName, parameters);
             n.getAnnotations().forEach(annotation -> methodAnnotations.add(annotation.getNameAsString())); // Store method annotations
             currentMethod = methodName; // Set the current method being visited
+
             methodCalls.putIfAbsent(methodName, new HashSet<>()); // Initialize method call set
 
             // Store the start and end lines of the method
             Map<String, Object> details = new HashMap<>();
+            details.put("methodAccess", n.getAccessSpecifier().asString());
+            details.put("ReturnType", n.getType().asString()); // Add return type to method details
             details.put("StartLine", n.getBegin().map(pos -> pos.line).orElse(-1));
             details.put("EndLine", n.getEnd().map(pos -> pos.line).orElse(-1));
             methodDetails.put(methodName, details);
@@ -192,10 +217,17 @@ public class ProjectParser {
         public void visit(MethodCallExpr n, Void arg) {
             super.visit(n, arg);
             if (currentMethod != null) {
-                methodCalls.get(currentMethod).add(n.getNameAsString()); // Store method calls
-                if (n.getScope().isPresent() && n.getScope().get() instanceof com.github.javaparser.ast.expr.NameExpr) {
-                    methodCalls.get(currentMethod).add(n.getScope().get().toString() + "." + n.getNameAsString()); // Store scoped method calls
+                Map<String, String> methodCallInfo = new HashMap<>();
+                methodCallInfo.put("MethodName", n.getNameAsString());
+
+                // Check if the method call has a scope
+                if (n.getScope().isPresent()) {
+                    methodCallInfo.put("Scope", n.getScope().get().toString());
+                } else {
+                    methodCallInfo.put("Scope", "this"); // If no scope, it's called on the current class
                 }
+
+                methodCalls.get(currentMethod).add(methodCallInfo); // Store method calls
             }
         }
 
@@ -223,8 +255,18 @@ public class ProjectParser {
             result.put("FieldAnnotations", fieldAnnotations);
             result.put("Imports", imports);
             result.put("Code", code);
+            result.put("FilePath", filePath); // Add the file path to the result
             result.put("Extends", extendsClass);
             result.put("Implements", implementsInterfaces);
+
+            // Add the correct parent class or interface
+            if (!extendsClass.isEmpty()) {
+                result.put("ParentClass", extendsClass);
+            } else if (!implementsInterfaces.isEmpty()) {
+                result.put("ParentClass", implementsInterfaces.iterator().next());
+            } else {
+                result.put("ParentClass", "None");
+            }
 
             // Create a list to hold method details
             List<Map<String, Object>> methodsList = new ArrayList<>();
