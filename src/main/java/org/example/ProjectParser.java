@@ -139,6 +139,7 @@ public class ProjectParser {
         private final Set<String> methodAnnotations = new HashSet<>(); // Set to store method annotations
         private final Map<String, String> methodReturnTypes = new HashMap<>(); // Map to store method return types
         private final Map<String, Set<String>> methodParameters = new HashMap<>(); // Map to store method parameters
+        private final Set<Map<String, String>> databaseOperations = new HashSet<>(); // Set to store database operations
         private String packageName = ""; // String to store package name
         private String extendsClass = ""; // String to store extended class name
         private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
@@ -189,9 +190,20 @@ public class ProjectParser {
             super.visit(n, arg);
             for (VariableDeclarator var : n.getVariables()) {
                 fields.put(var.getNameAsString(), var.getType().asString()); // Store field names and types
+                n.getAnnotations().forEach(annotation -> {
+                    fieldAnnotations.add(annotation.getNameAsString()); // Store field annotations
+                    // Check for database-related annotations
+                    if (annotation.getNameAsString().matches("JoinColumn|OneToMany|ManyToOne|OneToOne|ManyToMany|Table|Column")) {
+                        Map<String, String> dbOperation = new HashMap<>();
+                        dbOperation.put("Annotation", annotation.getNameAsString());
+                        dbOperation.put("Field", var.getNameAsString());
+                        dbOperation.put("Details", annotation.toString());
+                        databaseOperations.add(dbOperation); // Store database operation
+                    }
+                });
             }
-            n.getAnnotations().forEach(annotation -> fieldAnnotations.add(annotation.getNameAsString())); // Store field annotations
         }
+
 
         @Override
         public void visit(MethodDeclaration n, Void arg) {
@@ -231,6 +243,16 @@ public class ProjectParser {
                 }
 
                 methodCalls.get(currentMethod).add(methodCallInfo); // Store method calls
+
+                // Detect database operations
+                if (n.getNameAsString().matches("executeQuery|executeUpdate|execute|prepareStatement|createStatement|setAutoCommit|commit|rollback|close")) {
+                    Map<String, String> dbOperation = new HashMap<>();
+                    dbOperation.put("Operation", n.getNameAsString());
+                    dbOperation.put("Method", currentMethod);
+                    dbOperation.put("Line", String.valueOf(n.getBegin().map(pos -> pos.line).orElse(-1)));
+                    dbOperation.put("Details", n.toString());
+                    databaseOperations.add(dbOperation); // Store database operation
+                }
             }
         }
 
@@ -289,6 +311,9 @@ public class ProjectParser {
 
             // Add object creations to the result
             result.put("ObjectCreations", objectCreations);
+
+            // Add database operations to the result
+            result.put("DatabaseOperations", databaseOperations);
 
             return result;
         }
