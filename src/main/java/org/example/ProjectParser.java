@@ -258,7 +258,7 @@ public class ProjectParser {
             result.put("FieldAnnotations", fieldAnnotations);
             result.put("Imports", imports);
             result.put("Code", code);
-            result.put("FilePath", relativeFilePath); // Add the relative file path to the result
+            result.put("FilePath", relativeFilePath.replace("\\", "/")); // Add the relative file path to the result
             result.put("Extends", extendsClass);
             result.put("Implements", implementsInterfaces);
 
