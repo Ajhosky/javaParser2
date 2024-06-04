@@ -64,7 +64,7 @@ public class ProjectParser {
 
         // Configure JavaParser to use Java 12
         ParserConfiguration parserConfiguration = new ParserConfiguration();
-        parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_12);
+        parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
         JavaParser javaParser = new JavaParser(parserConfiguration);
 
         // List to store parsed information from each Java file
