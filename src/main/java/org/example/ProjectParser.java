@@ -92,6 +92,7 @@ public class ProjectParser {
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsedFiles);
 
             // Save the JSON result to the specified file
+            outputJsonFile += ".json";
             Files.write(Paths.get(outputJsonFile), json.getBytes());
             logger.info("JSON output successfully written to " + outputJsonFile);
         } catch (IOException e) {
