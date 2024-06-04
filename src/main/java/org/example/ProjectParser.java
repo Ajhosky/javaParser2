@@ -19,6 +19,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -62,7 +63,7 @@ public class ProjectParser {
     public static void parseProjectToJson(String projectDir, String outputJsonFile) throws Exception {
         List<File> javaFiles = listJavaFiles(projectDir);  // List all Java files in the specified directory
 
-        // Configure JavaParser to use Java 12
+        // Configure JavaParser to use Java 17
         ParserConfiguration parserConfiguration = new ParserConfiguration();
         parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
         JavaParser javaParser = new JavaParser(parserConfiguration);
@@ -75,7 +76,7 @@ public class ProjectParser {
                 CompilationUnit cu = javaParser.parse(in).getResult().orElseThrow(() -> new Exception("Parsing failed"));
 
                 // Create a visitor to collect information from the CompilationUnit
-                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())), file.getAbsolutePath());
+                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())), file.getAbsolutePath(), projectDir);
                 // Visit the CompilationUnit with the created visitor
                 cu.accept(classVisitor, null);
 
@@ -142,19 +143,20 @@ public class ProjectParser {
         private String extendsClass = ""; // String to store extended class name
         private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
         private final String code; // String to store the source code
-        private final String filePath; // String to store the file path
+        private final String relativeFilePath; // String to store the relative file path
         private String currentMethod = null; // String to store the current method name being visited
         private String structType = ""; // String to store the type (class or interface)
 
         /**
-         * Constructor to initialize ClassVisitor with the source code and file path.
+         * Constructor to initialize ClassVisitor with the source code, file path, and project directory.
          *
          * @param code the source code of the Java file
          * @param filePath the file path of the Java file
+         * @param projectDir the path to the project directory
          */
-        public ClassVisitor(String code, String filePath) {
+        public ClassVisitor(String code, String filePath, String projectDir) {
             this.code = code;
-            this.filePath = filePath;
+            this.relativeFilePath = Paths.get(projectDir).relativize(Paths.get(filePath)).toString();
         }
 
         @Override
@@ -256,7 +258,7 @@ public class ProjectParser {
             result.put("FieldAnnotations", fieldAnnotations);
             result.put("Imports", imports);
             result.put("Code", code);
-            result.put("FilePath", filePath); // Add the file path to the result
+            result.put("FilePath", relativeFilePath); // Add the relative file path to the result
             result.put("Extends", extendsClass);
             result.put("Implements", implementsInterfaces);
 
