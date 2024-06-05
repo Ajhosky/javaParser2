@@ -19,7 +19,6 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -147,6 +146,7 @@ public class ProjectParser {
         private final String relativeFilePath; // String to store the relative file path
         private String currentMethod = null; // String to store the current method name being visited
         private String structType = ""; // String to store the type (class or interface)
+        private final Map<String, String> classDetails = new HashMap<>(); // Map to store class details
 
         /**
          * Constructor to initialize ClassVisitor with the source code, file path, and project directory.
@@ -183,6 +183,10 @@ public class ProjectParser {
                 result.put("Implements", implementsInterfaces);
             }
             n.getAnnotations().forEach(annotation -> classAnnotations.add(annotation.getNameAsString())); // Store class annotations
+
+            // Store class details
+            classDetails.put("ClassName", n.getNameAsString());
+            classDetails.put("PackageName", packageName);
         }
 
         @Override
@@ -192,18 +196,15 @@ public class ProjectParser {
                 fields.put(var.getNameAsString(), var.getType().asString()); // Store field names and types
                 n.getAnnotations().forEach(annotation -> {
                     fieldAnnotations.add(annotation.getNameAsString()); // Store field annotations
-                    // Check for database-related annotations
-                    if (annotation.getNameAsString().matches("JoinColumn|OneToMany|ManyToOne|OneToOne|ManyToMany|Table|Column")) {
-                        Map<String, String> dbOperation = new HashMap<>();
-                        dbOperation.put("Annotation", annotation.getNameAsString());
-                        dbOperation.put("Field", var.getNameAsString());
-                        dbOperation.put("Details", annotation.toString());
-                        databaseOperations.add(dbOperation); // Store database operation
-                    }
+                    // Store all annotations, not just database-related ones
+                    Map<String, String> dbOperation = new HashMap<>();
+                    dbOperation.put("Annotation", annotation.getNameAsString());
+                    dbOperation.put("Field", var.getNameAsString());
+                    dbOperation.put("Details", annotation.toString());
+                    databaseOperations.add(dbOperation); // Store database operation
                 });
             }
         }
-
 
         @Override
         public void visit(MethodDeclaration n, Void arg) {
@@ -225,6 +226,7 @@ public class ProjectParser {
             details.put("ReturnType", n.getType().asString()); // Add return type to method details
             details.put("StartLine", n.getBegin().map(pos -> pos.line).orElse(-1));
             details.put("EndLine", n.getEnd().map(pos -> pos.line).orElse(-1));
+            details.put("Code", n.toString()); // Add the method code
             methodDetails.put(methodName, details);
         }
 
@@ -237,9 +239,22 @@ public class ProjectParser {
 
                 // Check if the method call has a scope
                 if (n.getScope().isPresent()) {
-                    methodCallInfo.put("Scope", n.getScope().get().toString());
+                    String scope = n.getScope().get().toString();
+                    methodCallInfo.put("Scope", scope);
+
+                    // Extract class and package information from the scope
+                    String[] scopeParts = scope.split("\\.");
+                    if (scopeParts.length > 0) {
+                        methodCallInfo.put("FromClass", scopeParts[scopeParts.length - 1]);
+                        if (scopeParts.length > 1) {
+                            String fromPackage = String.join(".", Arrays.copyOf(scopeParts, scopeParts.length - 1));
+                            methodCallInfo.put("FromPackage", fromPackage);
+                        }
+                    }
                 } else {
                     methodCallInfo.put("Scope", "this"); // If no scope, it's called on the current class
+                    methodCallInfo.put("FromClass", classDetails.get("ClassName"));
+                    methodCallInfo.put("FromPackage", classDetails.get("PackageName"));
                 }
 
                 methodCalls.get(currentMethod).add(methodCallInfo); // Store method calls
@@ -302,7 +317,7 @@ public class ProjectParser {
                 methodInfo.put("Parameters", methodParameters.get(method));
                 methodInfo.put("Annotations", methodAnnotations);
                 methodInfo.put("Details", methodDetails.get(method));
-                methodInfo.put("Calls", methodCalls.get(method));
+                methodInfo.put("MethodCalls", methodCalls.get(method)); // Renamed field
                 methodsList.add(methodInfo); // Add method info to the list
             }
 
