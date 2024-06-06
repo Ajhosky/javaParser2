@@ -17,6 +17,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.logging.Level;
@@ -54,7 +55,7 @@ public class ProjectParser {
     /**
      * Parses Java source files in the specified directory and writes the result to a JSON file.
      *
-     * @param projectDir the path to the project directory
+     * @param projectDir     the path to the project directory
      * @param outputJsonFile the name of the JSON file to be created
      * @throws Exception if an error occurs during parsing or writing the JSON file
      */
@@ -74,7 +75,7 @@ public class ProjectParser {
                 CompilationUnit cu = javaParser.parse(in).getResult().orElseThrow(() -> new Exception("Parsing failed"));
 
                 // Create a visitor to collect information from the CompilationUnit
-                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())), file.getAbsolutePath(), projectDir);
+                ClassVisitor classVisitor = new ClassVisitor(new String(Files.readAllBytes(file.toPath())), file.toPath(), Paths.get(projectDir));
                 // Visit the CompilationUnit with the created visitor
                 cu.accept(classVisitor, null);
 
@@ -131,7 +132,7 @@ public class ProjectParser {
         private final Map<String, Set<Map<String, String>>> methodCalls = new HashMap<>(); // Map to store method calls
         private final Set<String> objectCreations = new HashSet<>(); // Set to store created objects
         private final Set<String> imports = new HashSet<>(); // Set to store import statements
-        private final Map<String, String> fields = new HashMap<>(); // Map to store field names and types
+        private final Map<String, Map<String, String>> fields = new HashMap<>(); // Updated to store field names, types, and access
         private final Set<String> classAnnotations = new HashSet<>(); // Set to store class annotations
         private final Set<String> fieldAnnotations = new HashSet<>(); // Set to store field annotations
         private final Map<String, Set<String>> methodAnnotations = new HashMap<>(); // Set to store method annotations
@@ -139,25 +140,30 @@ public class ProjectParser {
         private final Map<String, Set<String>> methodParameters = new HashMap<>(); // Map to store method parameters
         private final Set<Map<String, String>> databaseOperations = new HashSet<>(); // Set to store database operations
         private final List<Map<String, Object>> endpoints = new ArrayList<>(); // List to store endpoint information
+        private final List<Map<String, Object>> innerClassList = new ArrayList<>(); // List to store inner classes
         private String packageName = ""; // String to store package name
         private String extendsClass = ""; // String to store extended class name
         private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
         private final String code; // String to store the source code
-        private final String relativeFilePath; // String to store the relative file path
+        private final Path relativeFilePath; // Path to store the relative file path
         private String currentMethod = null; // String to store the current method name being visited
         private String structType = ""; // String to store the type (class or interface)
         private final Map<String, String> classDetails = new HashMap<>(); // Map to store class details
+        private final Path projectDir; // Store projectDir for inner class visitors
+        private final Path filePath; // Store filePath for inner class visitors
 
         /**
          * Constructor to initialize ClassVisitor with the source code, file path, and project directory.
          *
-         * @param code the source code of the Java file
-         * @param filePath the file path of the Java file
+         * @param code       the source code of the Java file
+         * @param filePath   the file path of the Java file
          * @param projectDir the path to the project directory
          */
-        public ClassVisitor(String code, String filePath, String projectDir) {
+        public ClassVisitor(String code, Path filePath, Path projectDir) {
             this.code = code;
-            this.relativeFilePath = Paths.get(projectDir).relativize(Paths.get(filePath)).toString();
+            this.filePath = filePath;
+            this.projectDir = projectDir;
+            this.relativeFilePath = projectDir.relativize(filePath);
         }
 
         @Override
@@ -170,30 +176,43 @@ public class ProjectParser {
         public void visit(ClassOrInterfaceDeclaration n, Void arg) {
             super.visit(n, arg);
             structType = n.isInterface() ? "Interface" : "Class"; // Determine if it's a class or interface
-            result.put("StructType", structType); // Store the type (class/interface)
+            result.put("structType", structType); // Store the type (class/interface)
+            result.put("className", n.getNameAsString()); // Store the class/interface name
+            result.put("packageName", packageName); // Store the package name
             result.put("classAccess", n.getAccessSpecifier().asString());
-            result.put("ClassName", n.getNameAsString()); // Store the class/interface name
             if (n.getExtendedTypes().isNonEmpty()) {
                 extendsClass = n.getExtendedTypes(0).getNameAsString(); // Store the extended class name
-                result.put("Extends", extendsClass);
+                result.put("extend", extendsClass);
             }
             if (n.getImplementedTypes().isNonEmpty()) {
                 n.getImplementedTypes().forEach(implementedType ->
                         implementsInterfaces.add(implementedType.getNameAsString())); // Store implemented interfaces
-                result.put("Implements", implementsInterfaces);
+                result.put("implementList", implementsInterfaces);
             }
             n.getAnnotations().forEach(annotation -> classAnnotations.add(annotation.getNameAsString())); // Store class annotations
 
             // Store class details
             classDetails.put("ClassName", n.getNameAsString());
             classDetails.put("PackageName", packageName);
+
+            // Visit inner classes
+            n.getMembers().forEach(member -> {
+                if (member instanceof ClassOrInterfaceDeclaration) {
+                    ClassVisitor innerClassVisitor = new ClassVisitor(code, filePath, projectDir); // Pass filePath and projectDir
+                    member.accept(innerClassVisitor, arg);
+                    innerClassList.add(innerClassVisitor.getResult());
+                }
+            });
         }
 
         @Override
         public void visit(FieldDeclaration n, Void arg) {
             super.visit(n, arg);
             for (VariableDeclarator var : n.getVariables()) {
-                fields.put(var.getNameAsString(), var.getType().asString()); // Store field names and types
+                Map<String, String> fieldDetails = new HashMap<>();
+                fieldDetails.put("type", var.getType().asString());
+                fieldDetails.put("access", n.getAccessSpecifier().asString());
+                fields.put(var.getNameAsString(), fieldDetails); // Store field names, types, and access
                 n.getAnnotations().forEach(annotation -> {
                     fieldAnnotations.add(annotation.getNameAsString()); // Store field annotations
                     // Store all annotations, not just database-related ones
@@ -344,23 +363,26 @@ public class ProjectParser {
          * @return a map containing the collected information
          */
         public Map<String, Object> getResult() {
-            result.put("PackageName", packageName);
-            result.put("ClassAnnotations", classAnnotations);
+            result.put("packageName", packageName);
+            result.put("importList", imports);
+            result.put("fieldList", fields);
             result.put("Fields", fields);
             result.put("FieldAnnotations", fieldAnnotations);
-            result.put("Imports", imports);
             result.put("Code", code);
-            result.put("FilePath", relativeFilePath.replace("\\", "/")); // Add the relative file path to the result
+            result.put("content", code); // Add the source code to the result
+            result.put("FilePath", relativeFilePath.toString().replace("\\", "/")); // Add the relative file path to the result
+            result.put("filepath", relativeFilePath.toString().replace("\\", "/")); // Add the relative file path to the result
             result.put("Extends", extendsClass);
             result.put("Implements", implementsInterfaces);
+            result.put("parent_class", extendsClass);
 
             // Add the correct parent class or interface
             if (!extendsClass.isEmpty()) {
-                result.put("ParentClass", extendsClass);
+                result.put("parent_class", extendsClass);
             } else if (!implementsInterfaces.isEmpty()) {
-                result.put("ParentClass", implementsInterfaces.iterator().next());
+                result.put("parent_class", implementsInterfaces.iterator().next());
             } else {
-                result.put("ParentClass", "None");
+                result.put("parent_class", "None");
             }
 
             // Create a list to hold method details
@@ -377,7 +399,7 @@ public class ProjectParser {
             }
 
             // Add methods list to the result
-            result.put("Methods", methodsList);
+            result.put("methodList", methodsList);
 
             // Add object creations to the result
             result.put("ObjectCreations", objectCreations);
@@ -387,6 +409,9 @@ public class ProjectParser {
 
             // Add endpoints to the result
             result.put("Endpoints", endpoints);
+
+            // Add inner classes to the result
+            result.put("innerClassList", innerClassList);
 
             return result;
         }
