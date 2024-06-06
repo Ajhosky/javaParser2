@@ -1,0 +1,98 @@
+[
+  {
+    "structType": "Class", // or "Interface"
+    "className": "ClassName",
+    "packageName": "com.example.package",
+    "classAccess": "public", // or other access specifier
+    "extend": "SuperClassName",
+    "implementList": [
+      "InterfaceName1",
+      "InterfaceName2"
+    ],
+    "importList": [
+      "java.util.List",
+      "java.io.File"
+    ],
+    "FieldAnnotations": [
+      "Annotation1",
+      "Annotation2"
+    ],
+    "fieldList": {
+      "fieldName1": {
+        "type": "String",
+        "access": "private"
+      },
+      "fieldName2": {
+        "type": "int",
+        "access": "public"
+      }
+    },
+    "methodList": [
+      {
+        "MethodName": "methodName1",
+        "ReturnType": "void",
+        "Details": {
+          "methodAccess": "public",
+          "ReturnType": "void",
+          "StartLine": 10,
+          "EndLine": 20,
+          "Code": "public void methodName1() { ... }",
+          "methodParameters": {
+            "param1": "String",
+            "param2": "int"
+          },
+          "MethodCalls": [
+            {
+              "MethodName": "calledMethod1",
+              "Scope": "this",
+              "FromClass": "ClassName",
+              "FromPackage": "com.example.package"
+            },
+            {
+              "MethodName": "calledMethod2",
+              "Scope": "SomeOtherClass",
+              "FromClass": "SomeOtherClass",
+              "FromPackage": "com.example.otherpackage"
+            }
+          ]
+        }
+      }
+    ],
+    "ObjectCreations": [
+      "SomeClass"
+    ],
+    "DatabaseOperations": [
+      {
+        "Operation": "executeQuery",
+        "Method": "methodName1",
+        "Line": 15,
+        "Details": "statement.executeQuery(\"SELECT * FROM table\")"
+      }
+    ],
+    "Endpoints": [
+      {
+        "MethodName": "methodName1",
+        "Annotation": "GetMapping",
+        "Path": "/api/path",
+        "HTTPMethod": "GET",
+        "Parameters": {
+          "param1": "String"
+        },
+        "RequestBodyParameters": [
+          "RequestBodyParam"
+        ]
+      }
+    ],
+    "innerClassList": [
+      {
+        "structType": "Class",
+        "className": "InnerClassName",
+        "packageName": "com.example.package",
+        // Similar structure as above for inner classes
+      }
+    ],
+    "Code": "full class source code",
+    "FilePath": "relative/path/to/file.java",
+    "parent_class": "SuperClassName" // or first implemented interface
+  }
+]
