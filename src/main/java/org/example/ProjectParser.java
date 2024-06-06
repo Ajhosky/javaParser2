@@ -10,8 +10,7 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
-import com.github.javaparser.ast.expr.MethodCallExpr;
-import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 
 import java.io.File;
@@ -135,10 +134,11 @@ public class ProjectParser {
         private final Map<String, String> fields = new HashMap<>(); // Map to store field names and types
         private final Set<String> classAnnotations = new HashSet<>(); // Set to store class annotations
         private final Set<String> fieldAnnotations = new HashSet<>(); // Set to store field annotations
-        private final Set<String> methodAnnotations = new HashSet<>(); // Set to store method annotations
+        private final Map<String, Set<String>> methodAnnotations = new HashMap<>(); // Set to store method annotations
         private final Map<String, String> methodReturnTypes = new HashMap<>(); // Map to store method return types
         private final Map<String, Set<String>> methodParameters = new HashMap<>(); // Map to store method parameters
         private final Set<Map<String, String>> databaseOperations = new HashSet<>(); // Set to store database operations
+        private final List<Map<String, Object>> endpoints = new ArrayList<>(); // List to store endpoint information
         private String packageName = ""; // String to store package name
         private String extendsClass = ""; // String to store extended class name
         private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
@@ -213,9 +213,33 @@ public class ProjectParser {
             methods.add(methodName); // Store the method name
             methodReturnTypes.put(methodName, n.getType().asString()); // Store the method return type
             Set<String> parameters = new HashSet<>();
-            n.getParameters().forEach(param -> parameters.add(param.getType().asString() + " " + param.getNameAsString())); // Store method parameters
+            Set<String> requestBodyParameters = new HashSet<>();
+            n.getParameters().forEach(param -> {
+                if (param.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("RequestBody"))) {
+                    requestBodyParameters.add(param.getType().asString() + " " + param.getNameAsString());
+                } else {
+                    parameters.add(param.getType().asString() + " " + param.getNameAsString());
+                }
+            });
             methodParameters.put(methodName, parameters);
-            n.getAnnotations().forEach(annotation -> methodAnnotations.add(annotation.getNameAsString())); // Store method annotations
+
+            Set<String> relevantMethodAnnotations = new HashSet<>();
+            for (AnnotationExpr annotation : n.getAnnotations()) {
+                String annotationName = annotation.getNameAsString();
+                relevantMethodAnnotations.add(annotationName); // Store method annotations
+                // Check for endpoint annotations
+                if (Arrays.asList("RequestMapping", "GetMapping", "PostMapping", "PutMapping", "DeleteMapping").contains(annotationName)) {
+                    Map<String, Object> endpoint = new HashMap<>();
+                    endpoint.put("MethodName", methodName);
+                    endpoint.put("Annotation", annotationName);
+                    endpoint.put("Path", extractPathFromAnnotation(annotation));
+                    endpoint.put("HTTPMethod", extractHttpMethodFromAnnotation(annotationName));
+                    endpoint.put("Parameters", parameters);
+                    endpoint.put("RequestBodyParameters", requestBodyParameters);
+                    endpoints.add(endpoint);
+                }
+            }
+            methodAnnotations.put(methodName, relevantMethodAnnotations); // Store relevant method annotations
             currentMethod = methodName; // Set the current method being visited
 
             methodCalls.putIfAbsent(methodName, new HashSet<>()); // Initialize method call set
@@ -228,6 +252,37 @@ public class ProjectParser {
             details.put("EndLine", n.getEnd().map(pos -> pos.line).orElse(-1));
             details.put("Code", n.toString()); // Add the method code
             methodDetails.put(methodName, details);
+        }
+
+        private String extractPathFromAnnotation(AnnotationExpr annotation) {
+            if (annotation instanceof SingleMemberAnnotationExpr) {
+                return ((SingleMemberAnnotationExpr) annotation).getMemberValue().toString().replace("\"", "");
+            } else if (annotation instanceof NormalAnnotationExpr) {
+                for (MemberValuePair pair : ((NormalAnnotationExpr) annotation).getPairs()) {
+                    if (pair.getNameAsString().equals("value") || pair.getNameAsString().equals("path")) {
+                        return pair.getValue().toString().replace("\"", "");
+                    }
+                }
+            } else if (annotation instanceof MarkerAnnotationExpr) {
+                // For marker annotations without any members, return an empty path
+                return "";
+            }
+            return "";
+        }
+
+        private String extractHttpMethodFromAnnotation(String annotationName) {
+            switch (annotationName) {
+                case "GetMapping":
+                    return "GET";
+                case "PostMapping":
+                    return "POST";
+                case "PutMapping":
+                    return "PUT";
+                case "DeleteMapping":
+                    return "DELETE";
+                default:
+                    return "REQUEST";
+            }
         }
 
         @Override
@@ -315,7 +370,7 @@ public class ProjectParser {
                 methodInfo.put("MethodName", method);
                 methodInfo.put("ReturnType", methodReturnTypes.get(method));
                 methodInfo.put("Parameters", methodParameters.get(method));
-                methodInfo.put("Annotations", methodAnnotations);
+                methodInfo.put("Annotations", methodAnnotations.get(method));
                 methodInfo.put("Details", methodDetails.get(method));
                 methodInfo.put("MethodCalls", methodCalls.get(method)); // Renamed field
                 methodsList.add(methodInfo); // Add method info to the list
@@ -329,6 +384,9 @@ public class ProjectParser {
 
             // Add database operations to the result
             result.put("DatabaseOperations", databaseOperations);
+
+            // Add endpoints to the result
+            result.put("Endpoints", endpoints);
 
             return result;
         }
