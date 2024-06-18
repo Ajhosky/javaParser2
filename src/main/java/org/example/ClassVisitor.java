@@ -6,7 +6,6 @@ import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -29,6 +28,7 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
     private final Set<Map<String, String>> databaseOperations = new HashSet<>(); // Set to store database operations
     private final List<Map<String, Object>> endpoints = new ArrayList<>(); // List to store endpoint information
     private final List<Map<String, Object>> innerClassList = new ArrayList<>(); // List to store inner classes
+    private final List<Map<String, Object>> scheduledTasks = new ArrayList<>(); // List to store scheduled tasks
     private String packageName = ""; // String to store package name
     private String extendsClass = ""; // String to store extended class name
     private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
@@ -39,6 +39,7 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
     private final Map<String, String> classDetails = new HashMap<>(); // Map to store class details
     private final Path projectDir; // Store projectDir for inner class visitors
     private final Path filePath; // Store filePath for inner class visitors
+    private String basePath = ""; // Store base path from class-level @RequestMapping
 
     /**
      * Constructor to initialize ClassVisitor with the source code, file path, and project directory.
@@ -62,6 +63,14 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
 
     @Override
     public void visit(ClassOrInterfaceDeclaration n, Void arg) {
+        // Process class-level annotations first to ensure basePath is set
+        n.getAnnotations().forEach(annotation -> {
+            if (annotation.getNameAsString().equals("RequestMapping")) {
+                basePath = extractPathFromAnnotation(annotation); // Extract base path from class-level @RequestMapping
+
+            }
+        });
+
         super.visit(n, arg);
         structType = n.isInterface() ? "Interface" : "Class"; // Determine if it's a class or interface
         result.put("structType", structType); // Store the type (class/interface)
@@ -85,6 +94,69 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         });
 
         // Store class details
+        classDetails.put("className", n.getNameAsString());
+        classDetails.put("packageName", packageName);
+
+        // Visit inner classes
+        n.getMembers().forEach(member -> {
+            if (member instanceof ClassOrInterfaceDeclaration) {
+                ClassVisitor innerClassVisitor = new ClassVisitor(code, filePath, projectDir); // Pass filePath and projectDir
+                member.accept(innerClassVisitor, arg);
+                innerClassList.add(innerClassVisitor.getResult());
+            }
+        });
+    }
+
+    @Override
+    public void visit(RecordDeclaration n, Void arg) {
+        super.visit(n, arg);
+        structType = "Record"; // Set structType to Record for records
+        result.put("structType", structType); // Store the type (record)
+        result.put("className", n.getNameAsString()); // Store the record name
+        result.put("packageName", packageName); // Store the package name
+        result.put("classAccess", n.getAccessSpecifier().asString());
+        if (n.getImplementedTypes().isNonEmpty()) {
+            n.getImplementedTypes().forEach(implementedType ->
+                    implementsInterfaces.add(implementedType.getNameAsString())); // Store implemented interfaces
+            result.put("implementList", implementsInterfaces);
+        }
+        n.getAnnotations().forEach(annotation -> {
+            Map<String, String> annotationDetails = new HashMap<>();
+            annotationDetails.put("Annotation", annotation.getNameAsString());
+            annotationDetails.put("Details", annotation.toString());
+            classAnnotations.add(annotationDetails); // Store record annotations
+        });
+
+        // Store class details
+        classDetails.put("className", n.getNameAsString());
+        classDetails.put("packageName", packageName);
+
+        // Visit inner classes
+        n.getMembers().forEach(member -> {
+            if (member instanceof ClassOrInterfaceDeclaration) {
+                ClassVisitor innerClassVisitor = new ClassVisitor(code, filePath, projectDir); // Pass filePath and projectDir
+                member.accept(innerClassVisitor, arg);
+                innerClassList.add(innerClassVisitor.getResult());
+            }
+        });
+    }
+
+    @Override
+    public void visit(EnumDeclaration n, Void arg) {
+        super.visit(n, arg);
+        structType = "Enum"; // Set structType to Enum for enums
+        result.put("structType", structType); // Store the type (enum)
+        result.put("className", n.getNameAsString()); // Store the enum name
+        result.put("packageName", packageName); // Store the package name
+        result.put("classAccess", n.getAccessSpecifier().asString());
+        n.getAnnotations().forEach(annotation -> {
+            Map<String, String> annotationDetails = new HashMap<>();
+            annotationDetails.put("Annotation", annotation.getNameAsString());
+            annotationDetails.put("Details", annotation.toString());
+            classAnnotations.add(annotationDetails); // Store enum annotations
+        });
+
+        // Store enum details
         classDetails.put("className", n.getNameAsString());
         classDetails.put("packageName", packageName);
 
@@ -174,11 +246,19 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
                 Map<String, Object> endpoint = new HashMap<>();
                 endpoint.put("MethodName", methodName);
                 endpoint.put("Annotation", annotation.getNameAsString());
-                endpoint.put("Path", extractPathFromAnnotation(annotation));
+                String combinedPath = combinePaths(basePath, extractPathFromAnnotation(annotation));
+
+                endpoint.put("Path", combinedPath);
                 endpoint.put("HTTPMethod", extractHttpMethodFromAnnotation(annotation.getNameAsString()));
                 endpoint.put("Parameters", parameters);
                 endpoint.put("RequestBodyParameters", requestBodyParameters);
                 endpoints.add(endpoint);
+            } else if (annotation.getNameAsString().equals("Scheduled")) {
+                Map<String, Object> scheduledTask = new HashMap<>();
+                scheduledTask.put("MethodName", methodName);
+                scheduledTask.put("Annotation", annotation.getNameAsString());
+                scheduledTask.put("CronExpression", extractCronExpression(annotation));
+                scheduledTasks.add(scheduledTask);
             }
         }
         methodAnnotations.put(methodName, relevantMethodAnnotations); // Store relevant method annotations
@@ -196,11 +276,21 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
                     return pair.getValue().toString().replace("\"", "");
                 }
             }
-        } else if (annotation instanceof MarkerAnnotationExpr) {
-            // For marker annotations without any members, return an empty path
-            return "";
         }
         return "";
+    }
+
+    private String combinePaths(String basePath, String methodPath) {
+        if (!basePath.startsWith("/")) {
+            basePath = "/" + basePath;
+        }
+        if (basePath.endsWith("/")) {
+            basePath = basePath.substring(0, basePath.length() - 1);
+        }
+        if (!methodPath.startsWith("/")) {
+            methodPath = "/" + methodPath;
+        }
+        return basePath + methodPath;
     }
 
     private String extractHttpMethodFromAnnotation(String annotationName) {
@@ -216,6 +306,17 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
             default:
                 return "REQUEST";
         }
+    }
+
+    private String extractCronExpression(AnnotationExpr annotation) {
+        if (annotation instanceof NormalAnnotationExpr) {
+            for (MemberValuePair pair : ((NormalAnnotationExpr) annotation).getPairs()) {
+                if (pair.getNameAsString().equals("cron")) {
+                    return pair.getValue().toString().replace("\"", "");
+                }
+            }
+        }
+        return "";
     }
 
     @Override
@@ -341,6 +442,9 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
 
         // Add inner classes to the result
         result.put("innerClassList", innerClassList);
+
+        // Add scheduled tasks to the result
+        result.put("ScheduledTasks", scheduledTasks);
 
         return result;
     }
