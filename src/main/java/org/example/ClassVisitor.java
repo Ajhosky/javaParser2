@@ -387,7 +387,30 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
             return resolvedClass.get();
         }
 
+        // Check if the scope is a method parameter
+        if (currentMethod != null) {
+            Map<String, String> parameters = methodParameters.get(currentMethod);
+            if (parameters != null && parameters.containsKey(methodCallExpr.getScope().get().toString())) {
+                return parameters.get(methodCallExpr.getScope().get().toString());
+            }
+        }
+
+        // If all else fails, try to resolve static methods
+        String staticMethodClass = resolveStaticMethodClass(methodCallExpr.getNameAsString());
+        if (staticMethodClass != null) {
+            return staticMethodClass;
+        }
+
         return null; // Return null if the class cannot be resolved
+    }
+
+    private String resolveStaticMethodClass(String methodName) {
+        // Check if the method name matches known static methods
+        // You can expand this with a map or more sophisticated logic if needed
+        if (methodName.equals("ok") || methodName.equals("noContent") || methodName.equals("created")) {
+            return "ResponseEntity";
+        }
+        return null;
     }
 
     private Optional<String> resolveFromImports(String className) {
