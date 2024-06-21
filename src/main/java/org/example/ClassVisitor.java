@@ -4,42 +4,46 @@ import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.PackageDeclaration;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
+import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Visitor class to collect information from the Java file.
  */
 public class ClassVisitor extends VoidVisitorAdapter<Void> {
-    private final Map<String, Object> result = new HashMap<>(); // Map to store collected information
-    private final Set<String> methods = new HashSet<>(); // Set to store method names
-    private final Map<String, Map<String, Object>> methodDetails = new HashMap<>(); // Map to store method details (start/end lines)
-    private final Map<String, Set<Map<String, Object>>> methodCalls = new HashMap<>(); // Map to store method calls
-    private final Set<String> objectCreations = new HashSet<>(); // Set to store created objects
-    private final Set<String> imports = new HashSet<>(); // Set to store import statements
-    private final Map<String, Map<String, Object>> fields = new HashMap<>(); // Updated to store field names, types, access, and annotations
-    private final Set<Map<String, String>> classAnnotations = new HashSet<>(); // Set to store class annotations
-    private final Map<String, Set<Map<String, String>>> methodAnnotations = new HashMap<>(); // Set to store method annotations
-    private final Set<Map<String, String>> fieldAnnotations = new HashSet<>(); // Set to store field annotations
-    private final Map<String, String> methodReturnTypes = new HashMap<>(); // Map to store method return types
-    private final Map<String, Map<String, String>> methodParameters = new HashMap<>(); // Map to store method parameters
-    private final Set<Map<String, String>> databaseOperations = new HashSet<>(); // Set to store database operations
-    private final List<Map<String, Object>> endpoints = new ArrayList<>(); // List to store endpoint information
-    private final List<Map<String, Object>> innerClassList = new ArrayList<>(); // List to store inner classes
-    private final List<Map<String, Object>> scheduledTasks = new ArrayList<>(); // List to store scheduled tasks
-    private String packageName = ""; // String to store package name
-    private String extendsClass = ""; // String to store extended class name
-    private final Set<String> implementsInterfaces = new HashSet<>(); // Set to store implemented interfaces
-    private final String code; // String to store the source code
-    private final Path relativeFilePath; // Path to store the relative file path
-    private String currentMethod = null; // String to store the current method name being visited
-    private String structType = ""; // String to store the type (class or interface)
-    private final Map<String, String> classDetails = new HashMap<>(); // Map to store class details
-    private final Path projectDir; // Store projectDir for inner class visitors
-    private final Path filePath; // Store filePath for inner class visitors
-    private String basePath = ""; // Store base path from class-level @RequestMapping
+    private final Map<String, Object> result = new LinkedHashMap<>();
+    private final Set<String> methods = new HashSet<>();
+    private final Map<String, Map<String, Object>> methodDetails = new HashMap<>();
+    private final Map<String, Set<Map<String, Object>>> methodCalls = new HashMap<>();
+    private final Set<String> objectCreations = new HashSet<>();
+    private final Set<String> imports = new HashSet<>();
+    private final Map<String, Map<String, Object>> fields = new HashMap<>();
+    private final Set<Map<String, String>> classAnnotations = new HashSet<>();
+    private final Map<String, Set<Map<String, String>>> methodAnnotations = new HashMap<>();
+    private final Set<Map<String, String>> fieldAnnotations = new HashSet<>();
+    private final Map<String, String> methodReturnTypes = new HashMap<>();
+    private final Map<String, Map<String, String>> methodParameters = new HashMap<>();
+    private final Set<Map<String, String>> databaseOperations = new HashSet<>();
+    private final List<Map<String, Object>> endpoints = new ArrayList<>();
+    private final List<Map<String, Object>> innerClassList = new ArrayList<>();
+    private final List<Map<String, Object>> scheduledTasks = new ArrayList<>();
+    private final Map<String, String> methodAccess = new HashMap<>();
+    private String packageName = "";
+    private String extendsClass = "";
+    private final Set<String> implementsInterfaces = new HashSet<>();
+    private final String code;
+    private final Path relativeFilePath;
+    private String currentMethod = null;
+    private String structType = "";
+    private final Map<String, String> classDetails = new HashMap<>();
+    private final Path projectDir;
+    private final Path filePath;
+    private String basePath = "";
 
     /**
      * Constructor to initialize ClassVisitor with the source code, file path, and project directory.
@@ -66,41 +70,39 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         // Process class-level annotations first to ensure basePath is set
         n.getAnnotations().forEach(annotation -> {
             if (annotation.getNameAsString().equals("RequestMapping")) {
-                basePath = extractPathFromAnnotation(annotation); // Extract base path from class-level @RequestMapping
-
+                basePath = extractPathFromAnnotation(annotation);
             }
         });
 
         super.visit(n, arg);
-        structType = n.isInterface() ? "Interface" : "Class"; // Determine if it's a class or interface
-        result.put("structType", structType); // Store the type (class/interface)
-        result.put("className", n.getNameAsString()); // Store the class/interface name
-        result.put("packageName", packageName); // Store the package name
+        structType = n.isInterface() ? "Interface" : "Class";
+        result.put("structType", structType);
+        result.put("className", n.getNameAsString());
+        result.put("packageName", packageName);
         result.put("classAccess", n.getAccessSpecifier().asString());
         if (n.getExtendedTypes().isNonEmpty()) {
-            extendsClass = n.getExtendedTypes(0).getNameAsString(); // Store the extended class name
+            extendsClass = n.getExtendedTypes(0).getNameAsString();
             result.put("extend", extendsClass);
         }
         if (n.getImplementedTypes().isNonEmpty()) {
             n.getImplementedTypes().forEach(implementedType ->
-                    implementsInterfaces.add(implementedType.getNameAsString())); // Store implemented interfaces
+                    implementsInterfaces.add(implementedType.getNameAsString()));
             result.put("implementList", implementsInterfaces);
         }
         n.getAnnotations().forEach(annotation -> {
             Map<String, String> annotationDetails = new HashMap<>();
             annotationDetails.put("Annotation", annotation.getNameAsString());
             annotationDetails.put("Details", annotation.toString());
-            classAnnotations.add(annotationDetails); // Store class annotations
+            classAnnotations.add(annotationDetails);
         });
 
-        // Store class details
         classDetails.put("className", n.getNameAsString());
         classDetails.put("packageName", packageName);
 
         // Visit inner classes
         n.getMembers().forEach(member -> {
             if (member instanceof ClassOrInterfaceDeclaration) {
-                ClassVisitor innerClassVisitor = new ClassVisitor(code, filePath, projectDir); // Pass filePath and projectDir
+                ClassVisitor innerClassVisitor = new ClassVisitor(code, filePath, projectDir);
                 member.accept(innerClassVisitor, arg);
                 innerClassList.add(innerClassVisitor.getResult());
             }
@@ -192,79 +194,90 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
 
     @Override
     public void visit(MethodDeclaration n, Void arg) {
-        super.visit(n, arg);
-        String methodName = n.getNameAsString();
-        methods.add(methodName); // Store the method name
-        methodReturnTypes.put(methodName, n.getType().asString()); // Store the method return type
+        String previousMethod = currentMethod; // Save the previous method
+        currentMethod = n.getNameAsString(); // Set the current method name
+        methods.add(currentMethod); // Add the method name to the set of methods
 
-        Map<String, String> parameters = new HashMap<>();
-        for (Parameter param : n.getParameters()) {
-            if (!methodName.equals("main")) {
-                parameters.put(param.getNameAsString(), param.getType().asString()); // Store parameter name and type
-            }
-        }
-        if (!methodName.equals("main")) {
-            methodParameters.put(methodName, parameters); // Store method parameters
-        }
-
-        Set<String> requestBodyParameters = new HashSet<>();
-        for (Parameter param : n.getParameters()) {
-            if (param.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("RequestBody"))) {
-                requestBodyParameters.add(param.getType().asString() + " " + param.getNameAsString());
-            }
-        }
-
-        // Store the start and end lines of the method
-        Map<String, Object> details = new HashMap<>();
+        // Collect method details
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("ReturnType", n.getType().asString());
         details.put("methodAccess", n.getAccessSpecifier().asString());
-        details.put("ReturnType", n.getType().asString()); // Add return type to method details
-        details.put("StartLine", n.getBegin().map(pos -> pos.line).orElse(-1));
-        details.put("EndLine", n.getEnd().map(pos -> pos.line).orElse(-1));
-        details.put("Code", n.toString()); // Add the method code
+        details.put("startLine", n.getBegin().map(pos -> pos.line).orElse(-1));
+        details.put("endLine", n.getEnd().map(pos -> pos.line).orElse(-1));
+        details.put("methodCode", n.toString()); // Add the method code
 
-        // Add parameters for the main method directly to the details map
-        if (methodName.equals("main")) {
-            List<String> mainMethodParameters = new ArrayList<>();
-            for (Parameter param : n.getParameters()) {
-                mainMethodParameters.add(param.getType().asString() + " " + param.getNameAsString());
-            }
-            details.put("methodParameters", mainMethodParameters);
-        } else {
-            details.put("methodParameters", parameters);
-        }
+        // Collect parameters
+        Map<String, String> parameters = new LinkedHashMap<>();
+        n.getParameters().forEach(p -> parameters.put(p.getNameAsString(), p.getType().asString()));
+        methodParameters.put(currentMethod, parameters);
+        details.put("Parameters", parameters); // Add parameters to method details
 
-        methodDetails.put(methodName, details);
+        methodDetails.put(currentMethod, details);
 
-        Set<Map<String, String>> relevantMethodAnnotations = new HashSet<>();
-        for (AnnotationExpr annotation : n.getAnnotations()) {
+        // Collect return type
+        methodReturnTypes.put(currentMethod, n.getType().asString());
+
+        // Collect access specifier
+        methodAccess.put(currentMethod, n.getAccessSpecifier().asString());
+
+        // Collect method annotations
+        Set<Map<String, String>> annotations = new HashSet<>();
+        n.getAnnotations().forEach(annotation -> {
             Map<String, String> annotationDetails = new HashMap<>();
             annotationDetails.put("Annotation", annotation.getNameAsString());
             annotationDetails.put("Details", annotation.toString());
-            relevantMethodAnnotations.add(annotationDetails); // Store method annotations
-            // Check for endpoint annotations
-            if (Arrays.asList("RequestMapping", "GetMapping", "PostMapping", "PutMapping", "DeleteMapping").contains(annotation.getNameAsString())) {
-                Map<String, Object> endpoint = new HashMap<>();
-                endpoint.put("MethodName", methodName);
-                endpoint.put("Annotation", annotation.getNameAsString());
-                String combinedPath = combinePaths(basePath, extractPathFromAnnotation(annotation));
+            annotations.add(annotationDetails);
+        });
+        methodAnnotations.put(currentMethod, annotations);
 
-                endpoint.put("Path", combinedPath);
-                endpoint.put("HTTPMethod", extractHttpMethodFromAnnotation(annotation.getNameAsString()));
+        // Collect endpoint details if present
+        n.getAnnotations().forEach(annotation -> {
+            String annotationName = annotation.getNameAsString();
+            if (annotationName.matches("GetMapping|PostMapping|PutMapping|DeleteMapping|RequestMapping")) {
+                Map<String, Object> endpoint = new LinkedHashMap<>();
+                endpoint.put("Method", currentMethod);
+                endpoint.put("HttpMethod", extractHttpMethodFromAnnotation(annotationName));
+                endpoint.put("Path", combinePaths(basePath, extractPathFromAnnotation(annotation)));
                 endpoint.put("Parameters", parameters);
-                endpoint.put("RequestBodyParameters", requestBodyParameters);
-                endpoints.add(endpoint);
-            } else if (annotation.getNameAsString().equals("Scheduled")) {
-                Map<String, Object> scheduledTask = new HashMap<>();
-                scheduledTask.put("MethodName", methodName);
-                scheduledTask.put("Annotation", annotation.getNameAsString());
-                scheduledTask.put("CronExpression", extractCronExpression(annotation));
-                scheduledTasks.add(scheduledTask);
-            }
-        }
-        methodAnnotations.put(methodName, relevantMethodAnnotations); // Store relevant method annotations
-        currentMethod = methodName; // Set the current method being visited
 
-        methodCalls.putIfAbsent(methodName, new HashSet<>()); // Initialize method call set
+                // Collect response type and package
+                String responseType = n.getType().asString();
+                endpoint.put("ResponseType", responseType);
+                String genericType = extractGenericType(responseType);
+                if (genericType != null) {
+                    endpoint.put("ResponseGenericType", genericType);
+                    String responsePackage = resolveFromImports(genericType).orElse("Unknown Package");
+                    endpoint.put("ResponsePackage", responsePackage);
+                } else {
+                    endpoint.put("ResponsePackage", resolveFromImports(responseType).orElse("Unknown Package"));
+                }
+
+                // Extract returned body and package
+                String returnedBody = extractReturnedBody(n);
+                endpoint.put("ReturnedBody", returnedBody);
+                if (returnedBody != null) {
+                    String returnedBodyPackage = resolveFromImports(returnedBody).orElse("Unknown Package");
+                    endpoint.put("ReturnedBodyPackage", returnedBodyPackage);
+                } else {
+                    endpoint.put("ReturnedBodyPackage", "Unknown Package");
+                }
+
+                endpoints.add(endpoint);
+
+            }
+        });
+
+        super.visit(n, arg); // Visit child nodes
+        currentMethod = previousMethod; // Restore the previous method
+    }
+
+    private String extractGenericType(String type) {
+        Pattern pattern = Pattern.compile("<(.*?)>");
+        Matcher matcher = pattern.matcher(type);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
     }
 
     private String extractPathFromAnnotation(AnnotationExpr annotation) {
@@ -323,57 +336,64 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
     public void visit(MethodCallExpr n, Void arg) {
         super.visit(n, arg);
         if (currentMethod != null) {
-            Map<String, Object> methodCallInfo = new HashMap<>();
+            Map<String, Object> methodCallInfo = new LinkedHashMap<>();
             methodCallInfo.put("MethodName", n.getNameAsString());
 
-            // Check if the method call has a scope
-            if (n.getScope().isPresent()) {
-                String scope = n.getScope().get().toString();
-                methodCallInfo.put("Scope", scope);
-
-                // Extract class and package information from the scope
-                String[] scopeParts = scope.split("\\.");
-                if (scopeParts.length > 0) {
-                    methodCallInfo.put("FromClass", scopeParts[scopeParts.length - 1]);
-                    if (scopeParts.length > 1) {
-                        String fromPackage = String.join(".", Arrays.copyOf(scopeParts, scopeParts.length - 1));
-                        methodCallInfo.put("FromPackage", fromPackage);
-                    }
-                }
-
-                // Additional logic to handle static method calls like ok(), noContent(), created()
-                if (scope.equals("ok") || scope.equals("noContent") || scope.equals("created")) {
-                    methodCallInfo.put("FromClass", "ResponseEntity");
-                    methodCallInfo.put("FromPackage", "org.springframework.http");
-                }
-
-                // If the scope is a method call like ok(), body() etc.
-                if (scope.equals("ok()") || scope.equals("noContent()") || scope.equals("created()")) {
-                    methodCallInfo.put("FromClass", "ResponseEntity");
-                    methodCallInfo.put("FromPackage", "org.springframework.http");
-                }
+            // Resolve the class where the method is defined
+            String fromClass = resolveFromClass(n);
+            if (fromClass != null) {
+                methodCallInfo.put("FromClass", fromClass);
             } else {
-                methodCallInfo.put("Scope", "this"); // If no scope, it's called on the current class
-                methodCallInfo.put("FromClass", classDetails.get("className"));
-                methodCallInfo.put("FromPackage", classDetails.get("packageName"));
+                methodCallInfo.put("Scope", "Unknown");
+                methodCallInfo.put("FromClass", "Unknown");
             }
 
-            // Check if it's a database operation
-            boolean isDatabaseOperation = n.getNameAsString().matches("executeQuery|executeUpdate|execute|prepareStatement|createStatement|setAutoCommit|commit|rollback|close");
-            methodCallInfo.put("isDatabaseOperation", isDatabaseOperation);
+            // Add line number information
+            methodCallInfo.put("Line", n.getBegin().map(pos -> pos.line).orElse(-1));
 
-            methodCalls.get(currentMethod).add(methodCallInfo); // Store method calls
+            // Initialize the method call set if not already present
+            methodCalls.computeIfAbsent(currentMethod, k -> new HashSet<>());
+            methodCalls.get(currentMethod).add(methodCallInfo);
 
-            // Store database operation separately if it's a database operation
-            if (isDatabaseOperation) {
-                Map<String, String> dbOperation = new HashMap<>();
-                dbOperation.put("Operation", n.getNameAsString());
-                dbOperation.put("Method", currentMethod);
-                dbOperation.put("Line", String.valueOf(n.getBegin().map(pos -> pos.line).orElse(-1)));
-                dbOperation.put("Details", n.toString());
-                databaseOperations.add(dbOperation); // Store database operation
+            // Debugging info
+            System.out.println("Method call in " + currentMethod + ": " + n.getNameAsString() + " from class " + fromClass);
+        }
+    }
+
+    private String resolveFromClass(MethodCallExpr methodCallExpr) {
+        // Check if the method is called on a field
+        if (methodCallExpr.getScope().isPresent()) {
+            String scope = methodCallExpr.getScope().get().toString();
+            if (fields.containsKey(scope)) {
+                return fields.get(scope).get("type").toString();
             }
         }
+
+        // Check if the method is called directly (no scope)
+        if (!methodCallExpr.getScope().isPresent()) {
+            // Check if the method is a static method from the current class or imports
+            for (String importStr : imports) {
+                if (importStr.endsWith("." + methodCallExpr.getNameAsString())) {
+                    return importStr.substring(0, importStr.lastIndexOf('.'));
+                }
+            }
+            return classDetails.get("className");
+        }
+
+        // Check if the scope is a known class from imports or fields
+        Optional<String> resolvedClass = resolveFromImports(methodCallExpr.getScope().get().toString());
+
+        if (resolvedClass.isPresent()) {
+            return resolvedClass.get();
+        }
+
+        return null; // Return null if the class cannot be resolved
+    }
+
+    private Optional<String> resolveFromImports(String className) {
+        return imports.stream()
+                .filter(imp -> imp.endsWith("." + className) || imp.equals(className))
+                .findFirst();
     }
 
     @Override
@@ -419,13 +439,14 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         // Create a list to hold method details
         List<Map<String, Object>> methodsList = new ArrayList<>();
         for (String method : methods) {
-            Map<String, Object> methodInfo = new HashMap<>();
-            methodInfo.put("MethodName", method); // Order adjusted
-            methodInfo.put("ReturnType", methodReturnTypes.get(method)); // Order adjusted
-            methodInfo.put("Details", methodDetails.get(method)); // Order adjusted
-            methodInfo.put("MethodCalls", methodCalls.get(method)); // Order adjusted
+            Map<String, Object> methodInfo = new LinkedHashMap<>();
+            methodInfo.put("MethodName", method);
+            methodInfo.put("ReturnType", methodReturnTypes.get(method));
+            methodInfo.put("Parameters", methodParameters.get(method)); // Add parameters to method info
+            methodInfo.put("Details", methodDetails.get(method));
+            methodInfo.put("MethodCalls", methodCalls.get(method));
             methodInfo.put("Annotations", methodAnnotations.get(method)); // Add annotations to method info
-            methodsList.add(methodInfo); // Add method info to the list
+            methodsList.add(methodInfo);
         }
 
         // Add methods list to the result
@@ -447,5 +468,35 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         result.put("ScheduledTasks", scheduledTasks);
 
         return result;
+    }
+
+    private String extractReturnedBody(MethodDeclaration n) {
+        // Analyze the method body to find return statements
+        ReturnFinder returnFinder = new ReturnFinder();
+        returnFinder.visit(n.getBody().orElse(null), null);
+        return returnFinder.getReturnedType();
+    }
+
+    private class ReturnFinder extends VoidVisitorAdapter<Void> {
+        private String returnedType;
+
+        @Override
+        public void visit(ReturnStmt n, Void arg) {
+            super.visit(n, arg);
+            Expression expr = n.getExpression().orElse(null);
+            if (expr != null) {
+                if (expr instanceof ObjectCreationExpr) {
+                    returnedType = ((ObjectCreationExpr) expr).getType().getNameAsString();
+                } else if (expr instanceof MethodCallExpr) {
+                    returnedType = ((MethodCallExpr) expr).getNameAsString();
+                } else {
+                    returnedType = expr.toString();
+                }
+            }
+        }
+
+        public String getReturnedType() {
+            return returnedType;
+        }
     }
 }
