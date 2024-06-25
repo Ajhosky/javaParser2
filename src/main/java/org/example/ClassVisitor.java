@@ -340,9 +340,12 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
             methodCallInfo.put("MethodName", n.getNameAsString());
 
             // Resolve the class where the method is defined
-            String fromClass = resolveFromClass(n);
+            String fromClass = resolveFromClass(n).toString();
+            Map<String, String> fromClassInfo = resolveFromClass(n);
             if (fromClass != null) {
-                methodCallInfo.put("FromClass", fromClass);
+                methodCallInfo.put("FromClass", fromClassInfo.get("FromClass"));
+                methodCallInfo.put("FilePath", fromClassInfo.get("FilePath"));
+                methodCallInfo.put("Scope", fromClassInfo.get("Scope"));
             } else {
                 methodCallInfo.put("Scope", "Unknown");
                 methodCallInfo.put("FromClass", "Unknown");
@@ -358,62 +361,83 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
     }
 
     private boolean methodExistsInClassOrInterface(String className, String methodName) {
-        // This function should check if a given method exists in the specified class or interface
-        // Implement this based on your context, e.g., by using reflection or analyzing the AST
-        // This is a placeholder and needs to be implemented
+        // Implement this function to check if a given method exists in the specified class or interface
+        // This can be done using reflection or analyzing the AST of the class
+        // Placeholder implementation, replace with actual logic
         return false;
     }
 
-    private String resolveFromClass(MethodCallExpr methodCallExpr) {
+    private Map<String, String> resolveFromClass(MethodCallExpr methodCallExpr) {
+        Map<String, String> result = new HashMap<>();
         if (methodCallExpr.getScope().isPresent()) {
             String scope = methodCallExpr.getScope().get().toString();
+            result.put("Scope", scope);
 
             // Check if the method is called on a field
             if (fields.containsKey(scope)) {
-                return fields.get(scope).get("type").toString();
+                result.put("FromClass", fields.get(scope).get("type").toString());
+                result.put("FilePath", resolveClassFilePath(fields.get(scope).get("type").toString()));
+                return result;
             }
 
             // Check if the scope is a known class from imports or fields
             Optional<String> resolvedClass = resolveFromImports(scope);
             if (resolvedClass.isPresent()) {
-                return resolvedClass.get();
+                result.put("FromClass", resolvedClass.get());
+                result.put("FilePath", resolveClassFilePath(resolvedClass.get()));
+                return result;
             }
 
             // Check if the scope is a method parameter
             if (currentMethod != null) {
                 Map<String, String> parameters = methodParameters.get(currentMethod);
                 if (parameters != null && parameters.containsKey(scope)) {
-                    return parameters.get(scope);
+                    result.put("FromClass", parameters.get(scope));
+                    result.put("FilePath", resolveClassFilePath(parameters.get(scope)));
+                    return result;
                 }
             }
 
             // Check if the method belongs to the current class
             if (scope.equals("this") || scope.equals(classDetails.get("className"))) {
-                return classDetails.get("className");
+                result.put("FromClass", classDetails.get("className"));
+                result.put("FilePath", resolveClassFilePath(classDetails.get("className")));
+                return result;
             }
+        } else {
+            result.put("Scope", "None");
         }
 
         // If there's no explicit scope, check if it's a method in the current class or its parents
         if (!methodCallExpr.getScope().isPresent()) {
             String methodName = methodCallExpr.getNameAsString();
             if (methods.contains(methodName)) {
-                return classDetails.get("className");
+                result.put("FromClass", classDetails.get("className"));
+                result.put("FilePath", resolveClassFilePath(classDetails.get("className")));
+                return result;
             }
 
             if (!extendsClass.isEmpty() && methodExistsInClassOrInterface(extendsClass, methodName)) {
-                return extendsClass;
+                result.put("FromClass", extendsClass);
+                result.put("FilePath", resolveClassFilePath(extendsClass));
+                return result;
             }
 
             for (String interfaceName : implementsInterfaces) {
                 if (methodExistsInClassOrInterface(interfaceName, methodName)) {
-                    return interfaceName;
+                    result.put("FromClass", interfaceName);
+                    result.put("FilePath", resolveClassFilePath(interfaceName));
+                    return result;
                 }
             }
 
             // Check if the method is a static method from an import
             for (String importStr : imports) {
                 if (importStr.endsWith("." + methodName)) {
-                    return importStr.substring(0, importStr.lastIndexOf('.'));
+                    String className = importStr.substring(0, importStr.lastIndexOf('.'));
+                    result.put("FromClass", className);
+                    result.put("FilePath", resolveClassFilePath(className));
+                    return result;
                 }
             }
         }
@@ -421,26 +445,39 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         // Check if the scope is a static method
         String staticMethodClass = resolveStaticMethodClass(methodCallExpr.getNameAsString());
         if (staticMethodClass != null) {
-            return staticMethodClass;
+            result.put("FromClass", staticMethodClass);
+            result.put("FilePath", resolveClassFilePath(staticMethodClass));
+            return result;
         }
 
-        return null; // Return null if the class cannot be resolved
+        result.put("FromClass", "Unknown");
+        result.put("FilePath", "Unknown");
+        return result; // Return the map if the class cannot be resolved
     }
 
     private String resolveStaticMethodClass(String methodName) {
-        // Check if the method name matches known static methods
-        // You can expand this with a map or more sophisticated logic if needed
-        if (methodName.equals("ok") || methodName.equals("noContent") || methodName.equals("created")) {
-            return "ResponseEntity";
-        }
+        // Expand this mapping as needed
+        Map<String, String> staticMethods = Map.of(
+                "ok", "ResponseEntity",
+                "noContent", "ResponseEntity",
+                "created", "ResponseEntity"
+                // Add more static methods here
+        );
 
-        return null;
+        return staticMethods.getOrDefault(methodName, null);
     }
 
     private Optional<String> resolveFromImports(String className) {
         return imports.stream()
                 .filter(imp -> imp.endsWith("." + className) || imp.equals(className))
                 .findFirst();
+    }
+    private String resolveClassFilePath(String className) {
+        // Implement this function to resolve the file path of the given class
+        // You may need to search in the project directory or maintain a mapping of class names to file paths
+        // Placeholder implementation, replace with actual logic
+
+        return String.valueOf(filePath);
     }
 
     @Override
