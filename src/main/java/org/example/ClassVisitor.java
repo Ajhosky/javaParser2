@@ -354,48 +354,71 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
             // Initialize the method call set if not already present
             methodCalls.computeIfAbsent(currentMethod, k -> new HashSet<>());
             methodCalls.get(currentMethod).add(methodCallInfo);
-
-            // Debugging info
-            System.out.println("Method call in " + currentMethod + ": " + n.getNameAsString() + " from class " + fromClass);
         }
     }
 
+    private boolean methodExistsInClassOrInterface(String className, String methodName) {
+        // This function should check if a given method exists in the specified class or interface
+        // Implement this based on your context, e.g., by using reflection or analyzing the AST
+        // This is a placeholder and needs to be implemented
+        return false;
+    }
+
     private String resolveFromClass(MethodCallExpr methodCallExpr) {
-        // Check if the method is called on a field
         if (methodCallExpr.getScope().isPresent()) {
             String scope = methodCallExpr.getScope().get().toString();
+
+            // Check if the method is called on a field
             if (fields.containsKey(scope)) {
                 return fields.get(scope).get("type").toString();
             }
+
+            // Check if the scope is a known class from imports or fields
+            Optional<String> resolvedClass = resolveFromImports(scope);
+            if (resolvedClass.isPresent()) {
+                return resolvedClass.get();
+            }
+
+            // Check if the scope is a method parameter
+            if (currentMethod != null) {
+                Map<String, String> parameters = methodParameters.get(currentMethod);
+                if (parameters != null && parameters.containsKey(scope)) {
+                    return parameters.get(scope);
+                }
+            }
+
+            // Check if the method belongs to the current class
+            if (scope.equals("this") || scope.equals(classDetails.get("className"))) {
+                return classDetails.get("className");
+            }
         }
 
-        // Check if the method is called directly (no scope)
+        // If there's no explicit scope, check if it's a method in the current class or its parents
         if (!methodCallExpr.getScope().isPresent()) {
-            // Check if the method is a static method from the current class or imports
+            String methodName = methodCallExpr.getNameAsString();
+            if (methods.contains(methodName)) {
+                return classDetails.get("className");
+            }
+
+            if (!extendsClass.isEmpty() && methodExistsInClassOrInterface(extendsClass, methodName)) {
+                return extendsClass;
+            }
+
+            for (String interfaceName : implementsInterfaces) {
+                if (methodExistsInClassOrInterface(interfaceName, methodName)) {
+                    return interfaceName;
+                }
+            }
+
+            // Check if the method is a static method from an import
             for (String importStr : imports) {
-                if (importStr.endsWith("." + methodCallExpr.getNameAsString())) {
+                if (importStr.endsWith("." + methodName)) {
                     return importStr.substring(0, importStr.lastIndexOf('.'));
                 }
             }
-            return classDetails.get("className");
         }
 
-        // Check if the scope is a known class from imports or fields
-        Optional<String> resolvedClass = resolveFromImports(methodCallExpr.getScope().get().toString());
-
-        if (resolvedClass.isPresent()) {
-            return resolvedClass.get();
-        }
-
-        // Check if the scope is a method parameter
-        if (currentMethod != null) {
-            Map<String, String> parameters = methodParameters.get(currentMethod);
-            if (parameters != null && parameters.containsKey(methodCallExpr.getScope().get().toString())) {
-                return parameters.get(methodCallExpr.getScope().get().toString());
-            }
-        }
-
-        // If all else fails, try to resolve static methods
+        // Check if the scope is a static method
         String staticMethodClass = resolveStaticMethodClass(methodCallExpr.getNameAsString());
         if (staticMethodClass != null) {
             return staticMethodClass;
@@ -410,6 +433,7 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
         if (methodName.equals("ok") || methodName.equals("noContent") || methodName.equals("created")) {
             return "ResponseEntity";
         }
+
         return null;
     }
 
