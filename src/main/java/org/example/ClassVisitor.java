@@ -248,14 +248,13 @@ public class ClassVisitor extends VoidVisitorAdapter<Void> {
                 Map<String, Object> genericTypeDict = null;
                 if (genericType != null) {
                     if (genericType.contains("<")) {
-                        genericTypeDict = new HashMap<>();
+
                         String type = genericType.split("<")[0];
                         String genericObject = genericType.split("<")[1];
 
-                        genericTypeDict.put("Type", type);
-                        genericTypeDict.put("ResponseGenericType", genericObject);
-                        genericTypeDict.put("FullResponseGenericType", responseType);
-                        endpoints.add(genericTypeDict);
+                        endpoint.put("Type", type);
+                        endpoint.put("ResponseGenericType", genericObject);
+                        endpoint.put("FullResponseGenericType", responseType);
                     } else {
                         endpoint.put("ResponseGenericType", genericType);
                         String responsePackage = resolveFromImports(genericType).orElse("Unknown Package");
